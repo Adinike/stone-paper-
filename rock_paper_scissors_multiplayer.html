@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RPS Arena - Online 2-Player Showdown</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PeerJS for WebRTC Direct Multiplayer Connection -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- Canvas Confetti for winning celebration -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <!-- Font Awesome for clean modern icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f5f3ff',
+              500: '#8b5cf6',
+              600: '#7c3aed',
+              700: '#6d28d9',
+              900: '#4c1d95'
+            }
+          },
+          animation: {
+            'bounce-short': 'bounce 0.6s ease-in-out 3',
+            'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&display=swap');
+    body {
+      font-family: 'Outfit', sans-serif;
+    }
+    .custom-shadow {
+      box-shadow: 0 10px 30px -10px rgba(124, 58, 237, 0.3);
+    }
+    .weapon-card {
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .weapon-card:hover:not(:disabled) {
+      transform: translateY(-8px) scale(1.04);
+    }
+    .weapon-card:active:not(:disabled) {
+      transform: scale(0.96);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-purple-500 selection:text-white">
+
+  <!-- Floating Toast Message Container -->
+  <div id="toast" class="fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-5 py-3 rounded-xl bg-slate-800/95 border border-purple-500/50 text-slate-100 shadow-2xl backdrop-blur-md opacity-0 pointer-events-none transition-all duration-300 flex items-center gap-3 text-sm font-medium">
+    <i id="toastIcon" class="fa-solid fa-circle-info text-purple-400"></i>
+    <span id="toastMsg">Ready</span>
+  </div>
+
+  <!-- Header -->
+  <header class="w-full max-w-4xl mx-auto p-4 sm:p-6 flex items-center justify-between border-b border-slate-800/80">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-600/30 text-xl font-black">
+        ⚡
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-tight bg-gradient-to-r from-purple-400 via-indigo-300 to-pink-400 bg-clip-text text-transparent">RPS Arena</h1>
+        <p class="text-xs text-slate-400">Live 2-Player Web Showdown</p>
+      </div>
+    </div>
+    <div id="connectionBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-400">
+      <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+      <span id="badgeText">Offline / Standby</span>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="w-full max-w-4xl mx-auto px-4 py-6 flex-1 flex flex-col justify-center items-center">
+
+    <!-- STEP 1: LOBBY & TOKEN MANAGEMENT -->
+    <section id="lobbyScreen" class="w-full max-w-md bg-slate-900/90 border border-slate-800 p-6 sm:p-8 rounded-3xl shadow-2xl backdrop-blur-sm text-center">
+      <div class="mb-6">
+        <div class="inline-flex p-3 rounded-2xl bg-purple-500/10 text-purple-400 mb-3 text-2xl">
+          <i class="fa-solid fa-gamepad"></i>
+        </div>
+        <h2 class="text-2xl font-extrabold text-white">Create or Join Match</h2>
+        <p class="text-xs text-slate-400 mt-1">Play live with a friend across any network using room tokens.</p>
+      </div>
+
+      <!-- Action Choice Tabs -->
+      <div class="grid grid-cols-2 gap-2 p-1.5 bg-slate-950/60 rounded-2xl mb-6 border border-slate-800/80">
+        <button id="tabHost" onclick="switchTab('host')" class="py-2.5 text-sm font-semibold rounded-xl bg-purple-600 text-white transition-all shadow-md">Create Room</button>
+        <button id="tabJoin" onclick="switchTab('join')" class="py-2.5 text-sm font-semibold rounded-xl text-slate-400 hover:text-white transition-all">Join Room</button>
+      </div>
+
+      <!-- Tab: Host / Create -->
+      <div id="panelHost" class="space-y-4">
+        <button id="btnCreateRoom" onclick="createRoom()" class="w-full py-3.5 px-6 rounded-2xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center gap-2">
+          <i class="fa-solid fa-wand-magic-sparkles"></i> Generate Room Token
+        </button>
+
+        <div id="hostTokenDisplay" class="hidden pt-4 border-t border-slate-800/80 space-y-3">
+          <p class="text-xs text-slate-400 font-medium">Share this 6-character room token with your opponent:</p>
+          <div class="flex items-center justify-center gap-2">
+            <div id="hostTokenText" class="text-2xl font-mono font-black tracking-widest text-purple-300 bg-slate-950 px-5 py-3 rounded-2xl border border-purple-500/40 select-all">
+              ------
+            </div>
+            <button onclick="copyToken()" class="p-3.5 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 rounded-2xl text-purple-300 hover:text-white transition" title="Copy Token">
+              <i class="fa-regular fa-clone"></i>
+            </button>
+          </div>
+          <div class="flex items-center justify-center gap-2 text-xs text-amber-400 pt-2 font-medium">
+            <i class="fa-solid fa-spinner animate-spin"></i> Waiting for Player 2 to connect...
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Join -->
+      <div id="panelJoin" class="hidden space-y-4">
+        <div class="relative">
+          <input id="inputToken" type="text" maxlength="6" placeholder="ENTER 6-DIGIT TOKEN" class="w-full py-3.5 px-4 text-center text-lg font-mono tracking-widest uppercase bg-slate-950 border border-slate-800 focus:border-purple-500 rounded-2xl text-white outline-none transition uppercase placeholder:text-slate-600" />
+        </div>
+        <button id="btnJoinRoom" onclick="joinRoom()" class="w-full py-3.5 px-6 rounded-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2">
+          <i class="fa-solid fa-link"></i> Connect & Play
+        </button>
+      </div>
+    </section>
+
+    <!-- STEP 2: GAMEPLAY ARENA -->
+    <section id="gameScreen" class="hidden w-full flex flex-col items-center gap-6">
+
+      <!-- Scoreboard & Match Info -->
+      <div class="w-full max-w-2xl bg-slate-900/90 border border-slate-800/80 p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col gap-3">
+        <div class="flex items-center justify-between text-xs sm:text-sm font-semibold border-b border-slate-800/60 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span id="playerRoleBadge" class="text-purple-400 font-bold">You (Player 1)</span>
+          </div>
+          <div class="text-slate-400 flex items-center gap-1.5 font-mono">
+            Room: <span id="currentRoomTag" class="text-slate-200 uppercase font-black tracking-wider">ABC123</span>
+          </div>
+          <button onclick="leaveRoom()" class="text-slate-500 hover:text-rose-400 text-xs transition flex items-center gap-1">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> Exit
+          </button>
+        </div>
+
+        <!-- Scores Grid -->
+        <div class="grid grid-cols-3 text-center items-center py-1">
+          <div class="flex flex-col items-center">
+            <span class="text-xs uppercase font-bold text-slate-400" id="nameP1">You</span>
+            <span id="scoreP1" class="text-3xl sm:text-4xl font-black text-purple-400">0</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Ties</span>
+            <span id="scoreTies" class="text-xl sm:text-2xl font-bold text-slate-400">0</span>
+            <span class="text-[10px] text-slate-500 font-mono">ROUND <span id="roundCounter">1</span></span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-xs uppercase font-bold text-slate-400" id="nameP2">Opponent</span>
+            <span id="scoreP2" class="text-3xl sm:text-4xl font-black text-indigo-400">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Duel Showcase Stage (Avatar & Secret Status / Reveal) -->
+      <div class="w-full max-w-2xl bg-gradient-to-b from-slate-900/60 to-slate-950 border border-slate-800 p-6 sm:p-8 rounded-3xl relative overflow-hidden flex flex-col items-center justify-center min-h-[260px]">
+        
+        <!-- Background Accent Glow -->
+        <div class="absolute inset-0 bg-radial from-purple-900/10 via-transparent to-transparent pointer-events-none"></div>
+
+        <div class="w-full grid grid-cols-2 gap-4 items-center z-10">
+          
+          <!-- Local Player Display -->
+          <div class="flex flex-col items-center gap-3">
+            <div id="localAvatarBox" class="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-900 border-2 border-purple-500/40 flex items-center justify-center text-4xl sm:text-5xl shadow-lg shadow-purple-900/20 transition-all">
+              <span id="localPickIcon">❔</span>
+            </div>
+            <div class="text-center">
+              <span class="text-sm font-bold text-slate-200">You</span>
+              <div id="localStatusText" class="text-xs text-amber-400 font-medium flex items-center justify-center gap-1 mt-0.5">
+                Waiting for pick...
+              </div>
+            </div>
+          </div>
+
+          <!-- Remote Opponent Display -->
+          <div class="flex flex-col items-center gap-3">
+            <div id="remoteAvatarBox" class="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-900 border-2 border-slate-700/80 flex items-center justify-center text-4xl sm:text-5xl shadow-lg transition-all">
+              <span id="remotePickIcon">❔</span>
+            </div>
+            <div class="text-center">
+              <span class="text-sm font-bold text-slate-200">Opponent</span>
+              <div id="remoteStatusText" class="text-xs text-slate-400 font-medium flex items-center justify-center gap-1 mt-0.5">
+                Thinking...
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Center Match Outcome Overlay (Reveals when round finishes) -->
+        <div id="roundOutcomeArea" class="hidden mt-6 text-center z-10 transition-all">
+          <div id="outcomeTitle" class="text-2xl sm:text-3xl font-black tracking-tight text-white mb-1">
+            ROUND TIED!
+          </div>
+          <p id="outcomeSubtitle" class="text-xs sm:text-sm text-slate-300 mb-4">Rock smashes Scissors</p>
+          <button id="btnNextRound" onclick="proposeNextRound()" class="py-2.5 px-6 rounded-2xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-600/30 transition text-sm flex items-center gap-2 mx-auto">
+            <i class="fa-solid fa-forward"></i> <span id="nextRoundBtnText">Play Next Round</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Action Selection Pad -->
+      <div class="w-full max-w-2xl bg-slate-900/90 border border-slate-800/80 p-5 sm:p-6 rounded-3xl text-center">
+        <h3 id="instructionTitle" class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4">Choose Your Weapon</h3>
+        
+        <div class="grid grid-cols-3 gap-3 sm:gap-5">
+          <!-- Stone / Rock -->
+          <button onclick="makeChoice('rock')" id="btnRock" class="weapon-card group relative p-4 sm:p-6 rounded-2xl bg-slate-950 border-2 border-slate-800 hover:border-purple-500 focus:outline-none flex flex-col items-center gap-2">
+            <span class="text-4xl sm:text-5xl">🪨</span>
+            <span class="text-xs sm:text-sm font-bold text-slate-300 group-hover:text-purple-400">Stone</span>
+            <span class="text-[10px] text-slate-500">Beats Scissors</span>
+          </button>
+
+          <!-- Paper -->
+          <button onclick="makeChoice('paper')" id="btnPaper" class="weapon-card group relative p-4 sm:p-6 rounded-2xl bg-slate-950 border-2 border-slate-800 hover:border-purple-500 focus:outline-none flex flex-col items-center gap-2">
+            <span class="text-4xl sm:text-5xl">📄</span>
+            <span class="text-xs sm:text-sm font-bold text-slate-300 group-hover:text-purple-400">Paper</span>
+            <span class="text-[10px] text-slate-500">Beats Stone</span>
+          </button>
+
+          <!-- Scissors -->
+          <button onclick="makeChoice('scissors')" id="btnScissors" class="weapon-card group relative p-4 sm:p-6 rounded-2xl bg-slate-950 border-2 border-slate-800 hover:border-purple-500 focus:outline-none flex flex-col items-center gap-2">
+            <span class="text-4xl sm:text-5xl">✂️</span>
+            <span class="text-xs sm:text-sm font-bold text-slate-300 group-hover:text-purple-400">Scissors</span>
+            <span class="text-[10px] text-slate-500">Beats Paper</span>
+          </button>
+        </div>
+
+        <!-- Quick Reaction Bar -->
+        <div class="flex items-center justify-center gap-2 mt-5 pt-4 border-t border-slate-800/60 text-xs text-slate-400">
+          <span>Quick reaction:</span>
+          <button onclick="sendReaction('😎')" class="hover:scale-125 transition text-lg px-1.5">😎</button>
+          <button onclick="sendReaction('🔥')" class="hover:scale-125 transition text-lg px-1.5">🔥</button>
+          <button onclick="sendReaction('😱')" class="hover:scale-125 transition text-lg px-1.5">😱</button>
+          <button onclick="sendReaction('👏')" class="hover:scale-125 transition text-lg px-1.5">👏</button>
+          <button onclick="sendReaction('💀')" class="hover:scale-125 transition text-lg px-1.5">💀</button>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="w-full max-w-4xl mx-auto p-4 text-center text-xs text-slate-600">
+    Peer-to-Peer Encrypted Real-Time Multiplayer • Rock Paper Scissors
+  </footer>
+
+  <script>
+    /* -------------------------------------------------------------
+     * CORE MULTIPLAYER & GAME ENGINE
+     * ----------------------------------------------------------- */
+
+    const PREFIX = "rps-game-token-";
+    const WEAPON_ICONS = {
+      rock: "🪨",
+      paper: "📄",
+      scissors: "✂️"
+    };
+
+    // State Variables
+    let peer = null;
+    let conn = null;
+    let isHost = false;
+    let currentRoomCode = "";
+    let myChoice = null;
+    let opponentChoice = null;
+    let opponentLocked = false;
+    let scores = { p1: 0, p2: 0, ties: 0 };
+    let roundNum = 1;
+    let hasNextRoundReady = false;
+
+    // Toast helper
+    function showToast(msg, icon = "fa-circle-info") {
+      const toast = document.getElementById("toast");
+      const toastMsg = document.getElementById("toastMsg");
+      const toastIcon = document.getElementById("toastIcon");
+
+      toastMsg.innerText = msg;
+      toastIcon.className = `fa-solid ${icon} text-purple-400`;
+      toast.classList.remove("opacity-0", "pointer-events-none");
+      toast.classList.add("opacity-100", "-translate-y-1");
+
+      setTimeout(() => {
+        toast.classList.add("opacity-0", "pointer-events-none");
+        toast.classList.remove("opacity-100", "-translate-y-1");
+      }, 3200);
+    }
+
+    // Tab switcher between Host and Join panels
+    function switchTab(mode) {
+      const tabHost = document.getElementById("tabHost");
+      const tabJoin = document.getElementById("tabJoin");
+      const panelHost = document.getElementById("panelHost");
+      const panelJoin = document.getElementById("panelJoin");
+
+      if (mode === 'host') {
+        tabHost.className = "py-2.5 text-sm font-semibold rounded-xl bg-purple-600 text-white transition-all shadow-md";
+        tabJoin.className = "py-2.5 text-sm font-semibold rounded-xl text-slate-400 hover:text-white transition-all";
+        panelHost.classList.remove("hidden");
+        panelJoin.classList.add("hidden");
+      } else {
+        tabJoin.className = "py-2.5 text-sm font-semibold rounded-xl bg-purple-600 text-white transition-all shadow-md";
+        tabHost.className = "py-2.5 text-sm font-semibold rounded-xl text-slate-400 hover:text-white transition-all";
+        panelJoin.classList.remove("hidden");
+        panelHost.classList.add("hidden");
+      }
+    }
+
+    // Generate random 6 character token
+    function generateToken(length = 6) {
+      const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+      let token = "";
+      for (let i = 0; i < length; i++) {
+        token += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return token;
+    }
+
+    function setBadge(state, text) {
+      const badge = document.getElementById("connectionBadge");
+      const badgeText = document.getElementById("badgeText");
+      badgeText.innerText = text;
+
+      if (state === "ready") {
+        badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span><span>${text}</span>`;
+      } else if (state === "waiting") {
+        badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span><span>${text}</span>`;
+      } else {
+        badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span><span>${text}</span>`;
+      }
+    }
+
+    /* --- Host creates a Room --- */
+    function createRoom() {
+      const btn = document.getElementById("btnCreateRoom");
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Initializing Network...`;
+
+      const token = generateToken();
+      currentRoomCode = token;
+      const fullPeerId = PREFIX + token;
+
+      // Clean up previous peer if any
+      if (peer) peer.destroy();
+
+      peer = new Peer(fullPeerId);
+
+      peer.on('open', (id) => {
+        isHost = true;
+        document.getElementById("hostTokenText").innerText = token;
+        document.getElementById("hostTokenDisplay").classList.remove("hidden");
+        btn.classList.add("hidden");
+        setBadge("waiting", `Waiting in Room: ${token}`);
+        showToast("Room created! Send the code to your friend.", "fa-circle-check");
+      });
+
+      peer.on('connection', (connection) => {
+        conn = connection;
+        setupDataChannel();
+      });
+
+      peer.on('error', (err) => {
+        console.error("Peer error:", err);
+        showToast("Connection issue: " + err.type, "fa-triangle-exclamation");
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Generate Room Token`;
+      });
+    }
+
+    /* --- Opponent Joins Room --- */
+    function joinRoom() {
+      const tokenInput = document.getElementById("inputToken");
+      const token = tokenInput.value.trim().toUpperCase();
+
+      if (token.length !== 6) {
+        showToast("Please enter a valid 6-character token", "fa-circle-exclamation");
+        return;
+      }
+
+      currentRoomCode = token;
+      const btn = document.getElementById("btnJoinRoom");
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Connecting...`;
+
+      if (peer) peer.destroy();
+
+      peer = new Peer();
+
+      peer.on('open', () => {
+        const targetPeerId = PREFIX + token;
+        conn = peer.connect(targetPeerId);
+        isHost = false;
+        setupDataChannel();
+      });
+
+      peer.on('error', (err) => {
+        console.error("Peer error on join:", err);
+        showToast("Could not connect. Double-check token.", "fa-triangle-exclamation");
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-link"></i> Connect & Play`;
+      });
+    }
+
+    /* --- Setup Data Connection Channel --- */
+    function setupDataChannel() {
+      conn.on('open', () => {
+        setBadge("ready", "Connected & In Match");
+        launchGameView();
+        showToast("Connected to opponent! Get ready.", "fa-handshake");
+      });
+
+      conn.on('data', (data) => {
+        handleIncomingData(data);
+      });
+
+      conn.on('close', () => {
+        showToast("Opponent disconnected.", "fa-user-slash");
+        setBadge("offline", "Opponent left");
+        setTimeout(() => leaveRoom(), 2500);
+      });
+    }
+
+    function copyToken() {
+      const token = document.getElementById("hostTokenText").innerText;
+      const tempInput = document.createElement("input");
+      tempInput.value = token;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      document.execCommand("copy");
+      document.body.removeChild(tempInput);
+      showToast("Token copied to clipboard!", "fa-copy");
+    }
+
+    function launchGameView() {
+      document.getElementById("lobbyScreen").classList.add("hidden");
+      document.getElementById("gameScreen").classList.remove("hidden");
+      document.getElementById("currentRoomTag").innerText = currentRoomCode;
+
+      if (isHost) {
+        document.getElementById("playerRoleBadge").innerText = "You: Host (Player 1)";
+        document.getElementById("nameP1").innerText = "You (P1)";
+        document.getElementById("nameP2").innerText = "Opponent (P2)";
+      } else {
+        document.getElementById("playerRoleBadge").innerText = "You: Guest (Player 2)";
+        document.getElementById("nameP1").innerText = "Opponent (P1)";
+        document.getElementById("nameP2").innerText = "You (P2)";
+      }
+
+      resetRoundUI();
+    }
+
+    /* --- Choice & Secret Lock-in Logic --- */
+    function makeChoice(weapon) {
+      if (myChoice) return; // Prevent double pick
+      myChoice = weapon;
+
+      // Update Local UI
+      document.getElementById("localPickIcon").innerText = "🔒";
+      document.getElementById("localStatusText").innerHTML = `<span class="text-emerald-400 font-semibold">Choice Locked!</span>`;
+      document.getElementById("localAvatarBox").classList.add("border-purple-500", "scale-105");
+
+      // Highlight selected button & disable others
+      ['rock', 'paper', 'scissors'].forEach(w => {
+        const el = document.getElementById("btn" + w.charAt(0).toUpperCase() + w.slice(1));
+        if (w === weapon) {
+          el.classList.add("border-purple-500", "bg-purple-950/40");
+        } else {
+          el.classList.add("opacity-40", "cursor-not-allowed");
+          el.disabled = true;
+        }
+      });
+
+      // Broadcast secret lock notice to opponent
+      sendPayload({ type: 'LOCKED' });
+
+      // If opponent already locked in, reveal!
+      if (opponentLocked) {
+        revealSelections();
+      }
+    }
+
+    function handleIncomingData(data) {
+      switch (data.type) {
+        case 'LOCKED':
+          opponentLocked = true;
+          document.getElementById("remotePickIcon").innerText = "🔒";
+          document.getElementById("remoteStatusText").innerHTML = `<span class="text-emerald-400 font-semibold">Opponent is Ready!</span>`;
+          document.getElementById("remoteAvatarBox").classList.add("border-indigo-500", "scale-105");
+          
+          if (myChoice) {
+            revealSelections();
+          }
+          break;
+
+        case 'REVEAL':
+          opponentChoice = data.choice;
+          checkAndFinalizeRound();
+          break;
+
+        case 'NEXT_ROUND_PROPOSE':
+          document.getElementById("nextRoundBtnText").innerText = "Opponent is ready! Click to Start";
+          showToast("Opponent wants to play next round!", "fa-play");
+          hasNextRoundReady = true;
+          break;
+
+        case 'NEXT_ROUND_START':
+          startNextRound();
+          break;
+
+        case 'REACTION':
+          showToast(`Opponent: ${data.emoji}`, "fa-comment-dots");
+          break;
+      }
+    }
+
+    function sendPayload(payload) {
+      if (conn && conn.open) {
+        conn.send(payload);
+      }
+    }
+
+    function sendReaction(emoji) {
+      sendPayload({ type: 'REACTION', emoji });
+      showToast(`You reacted: ${emoji}`);
+    }
+
+    /* --- Reveal and Winner Calculation --- */
+    function revealSelections() {
+      // Exchange actual choices securely
+      sendPayload({ type: 'REVEAL', choice: myChoice });
+    }
+
+    function checkAndFinalizeRound() {
+      if (!myChoice || !opponentChoice) return;
+
+      // Animate countdown / reveal
+      const localBox = document.getElementById("localPickIcon");
+      const remoteBox = document.getElementById("remotePickIcon");
+
+      localBox.innerText = "✊";
+      remoteBox.innerText = "✊";
+
+      localBox.classList.add("animate-bounce-short");
+      remoteBox.classList.add("animate-bounce-short");
+
+      setTimeout(() => {
+        localBox.classList.remove("animate-bounce-short");
+        remoteBox.classList.remove("animate-bounce-short");
+
+        localBox.innerText = WEAPON_ICONS[myChoice];
+        remoteBox.innerText = WEAPON_ICONS[opponentChoice];
+
+        evaluateWinner(myChoice, opponentChoice);
+      }, 1000);
+    }
+
+    function evaluateWinner(localPick, oppPick) {
+      const outcomeArea = document.getElementById("roundOutcomeArea");
+      const title = document.getElementById("outcomeTitle");
+      const subtitle = document.getElementById("outcomeSubtitle");
+
+      outcomeArea.classList.remove("hidden");
+
+      let roundResult = ""; // "win", "lose", "tie"
+      let explanation = "";
+
+      if (localPick === oppPick) {
+        roundResult = "tie";
+        explanation = `Both players chose ${localPick.toUpperCase()}!`;
+        scores.ties++;
+      } else if (
+        (localPick === "rock" && oppPick === "scissors") ||
+        (localPick === "paper" && oppPick === "rock") ||
+        (localPick === "scissors" && oppPick === "paper")
+      ) {
+        roundResult = "win";
+        if (isHost) scores.p1++; else scores.p2++;
+        explanation = `${capitalize(localPick)} beats ${capitalize(oppPick)}!`;
+      } else {
+        roundResult = "lose";
+        if (isHost) scores.p2++; else scores.p1++;
+        explanation = `${capitalize(oppPick)} beats ${capitalize(localPick)}!`;
+      }
+
+      // Update Scores UI
+      document.getElementById("scoreP1").innerText = scores.p1;
+      document.getElementById("scoreP2").innerText = scores.p2;
+      document.getElementById("scoreTies").innerText = scores.ties;
+
+      if (roundResult === "win") {
+        title.innerHTML = `<span class="text-emerald-400">YOU WON ROUND ${roundNum}! 🎉</span>`;
+        subtitle.innerText = explanation;
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: { y: 0.6 }
+        });
+      } else if (roundResult === "lose") {
+        title.innerHTML = `<span class="text-rose-400">OPPONENT WON ROUND ${roundNum} 💥</span>`;
+        subtitle.innerText = explanation;
+      } else {
+        title.innerHTML = `<span class="text-amber-300">ROUND ${roundNum} TIED! 🤝</span>`;
+        subtitle.innerText = explanation;
+      }
+    }
+
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    /* --- Next Round Synchronization --- */
+    function proposeNextRound() {
+      const btnText = document.getElementById("nextRoundBtnText");
+      btnText.innerText = "Waiting for Opponent...";
+
+      if (hasNextRoundReady) {
+        // Both are ready, trigger start
+        sendPayload({ type: 'NEXT_ROUND_START' });
+        startNextRound();
+      } else {
+        sendPayload({ type: 'NEXT_ROUND_PROPOSE' });
+      }
+    }
+
+    function startNextRound() {
+      roundNum++;
+      document.getElementById("roundCounter").innerText = roundNum;
+      resetRoundUI();
+    }
+
+    function resetRoundUI() {
+      myChoice = null;
+      opponentChoice = null;
+      opponentLocked = false;
+      hasNextRoundReady = false;
+
+      document.getElementById("localPickIcon").innerText = "❔";
+      document.getElementById("remotePickIcon").innerText = "❔";
+      document.getElementById("localStatusText").innerHTML = `<span class="text-amber-400 font-medium">Waiting for your pick...</span>`;
+      document.getElementById("remoteStatusText").innerHTML = `<span class="text-slate-400 font-medium">Opponent thinking...</span>`;
+
+      document.getElementById("localAvatarBox").className = "w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-900 border-2 border-purple-500/40 flex items-center justify-center text-4xl sm:text-5xl shadow-lg transition-all";
+      document.getElementById("remoteAvatarBox").className = "w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-900 border-2 border-slate-700/80 flex items-center justify-center text-4xl sm:text-5xl shadow-lg transition-all";
+
+      document.getElementById("roundOutcomeArea").classList.add("hidden");
+      document.getElementById("nextRoundBtnText").innerText = "Play Next Round";
+
+      // Re-enable weapon buttons
+      ['rock', 'paper', 'scissors'].forEach(w => {
+        const el = document.getElementById("btn" + w.charAt(0).toUpperCase() + w.slice(1));
+        el.className = "weapon-card group relative p-4 sm:p-6 rounded-2xl bg-slate-950 border-2 border-slate-800 hover:border-purple-500 focus:outline-none flex flex-col items-center gap-2";
+        el.disabled = false;
+      });
+    }
+
+    function leaveRoom() {
+      if (conn) conn.close();
+      if (peer) peer.destroy();
+      window.location.reload();
+    }
+  </script>
+</body>
+</html>
